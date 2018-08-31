@@ -1,0 +1,32 @@
+# 西刺代理订单号
+tid = ''
+
+# 部署于Linux服务器时需要修改
+# 文本储存路径
+path = ''
+
+
+# 自定义redis信息
+redis_host = '127.0.0.1'
+redis_port = 6379
+redis_password = ''
+
+# redis不要占用以下命名
+# 代理池的字典名
+ipPool = 'ipPool'
+# 回收ip状态信息的队列名
+ipRecycle = 'recycle'
+
+"""
+    --------------******以下数据谨慎修改******----------------
+"""
+# 小于等于60分的IP被丢弃，可根据情况加进事件
+evenToDec = {
+    'suc': 1,
+    'warn': 20,
+    'fatal': 40,
+}
+# 代理池容量最大值
+poolMaxium = 200
+# 代理池容量最小值，
+poolMinium = 120
