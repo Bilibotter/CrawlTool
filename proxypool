@@ -162,4 +162,5 @@ if __name__ == '__main__':
             err = str(e)
             pool.logger.critical(err)
         finally:
-            time.sleep(5)
+            time.sleep(4)
+            
