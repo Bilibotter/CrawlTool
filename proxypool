@@ -1,0 +1,165 @@
+import sys
+import time
+import redis
+import logging
+import requests
+import subprocess
+from setting import *
+
+
+class proxypool():
+    def __init__(self):
+        self.loggerBuild()
+        self.conn = redis.StrictRedis(host=redis_host,
+                                      port=redis_port,
+                                      password=redis_password)
+        self.poolName = ipPool
+        self.recycleName = ipRecycle
+        self.conn.delete(self.poolName)
+        self.conn.delete(self.recycleName)
+
+    def loggerBuild(self):
+        sys.stderr = sys.stdout
+        endline = '-' * 20 + '*' * 20 + '-' * 20
+        logging.basicConfig(format='%(asctime)s - %(levelname)s - line %(lineno)d:\n'
+                                   '-***- %(message)s -***-\n'+endline+'\n')
+
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(level=logging.INFO)
+        file_handler = logging.FileHandler(path + 'proxy.log')
+        file_handler.setLevel(level=logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - line %(lineno)d:\n'
+                                      '-***- %(message)s -***-\n'+endline+'\n')
+
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
+
+    def monitor(self):
+        self.connectMonitor()
+        self.recycleMonitor()
+        self.poolMonitor()
+
+    def connectMonitor(self):
+        while True:
+            if self.canConnect():
+                break
+            else:
+                time.sleep(60)
+        return
+
+    def canConnect(self):
+        data = subprocess.Popen('ping 180.76.76.76',
+                                stdout=subprocess.PIPE,
+                                shell=True)
+        stdout1 = data.stdout.read()
+        stdout = str(stdout1, encoding='gbk')
+        if '超时' in stdout:
+            self.logger.fatal('网络连接超时')
+            return False
+        else:
+            self.logger.info('网络连接正常')
+            return True
+
+    def recycleMonitor(self):
+        recycleLen = self.conn.llen(self.recycleName)
+        for i in range(recycleLen):
+            zipInfo = str(self.conn.rpop(self.recycleName), encoding='utf-8')
+            score, proxy, status = zipInfo.split(',')
+            score = self.scoreChange(score, status)
+            if score > 60:
+                self.puts(proxy, score)
+            else:
+                continue
+
+    def scoreChange(self, score, status):
+        dec = evenToDec[status]
+        if score == 80 and status == 'suc':
+            score = 80
+        else:
+            score = score - dec
+        return score
+
+    def puts(self, proxy, score):
+        self.conn.zadd(self.poolName, score, proxy)
+
+    def poolMonitor(self):
+        poolCapability = self.conn.zcard(self.poolName)
+        if poolCapability < poolMinium:
+            print(f'Unrevised pool\'s capability is {poolCapability}.')
+            self.logger.info('Supplement proxy.')
+            self.poolAdd(poolMaxium-poolCapability)
+            poolCapability = self.conn.zcard(self.poolName)
+            self.logger.info(f'Revised pool\'s capability is {poolCapability}')
+        else:
+            print('Everything is ok.')
+
+    def poolAdd(self, num):
+        print(f'Num is {num}')
+        proxys = self.proxyGet(num)
+        for proxy in proxys:
+            self.puts(proxy, 100)
+        return
+
+    def proxyGet(self, num):
+        api = f'http://api3.xiguadaili.com/ip/?tid={tid}&num={num}&category=2&protocol=https&filter=on&longlife=10'
+        req = requests.get(api)
+        print(f'Api is {api}')
+        proxys = req.text.split('\r\n')
+        print('Has get', len(proxys), 'proxys')
+        sufficient = False if 'ERROR' in proxys[0] else True
+        if not sufficient:
+            api = f'http://api3.xiguadaili.com/ip/?tid={tid}&num={num}&category=2&protocol=https&longlife=10'
+            req = requests.get(api)
+            proxys = req.text.split('\r\n')
+            self.logger.warning('IP amount is not enough,using old proxy.')
+        return proxys
+
+
+class ipGetter():
+    def __init__(self):
+        self.loggerBuild()
+        self.conn = redis.StrictRedis(host=redis_host,
+                                      port=redis_port,
+                                      password=redis_password)
+        self.poolName = ipPool
+        self.recycleName = ipRecycle
+
+    def loggerBuild(self):
+        sys.stderr = sys.stdout
+        endline = '-' * 20 + '*' * 20 + '-' * 20
+        logging.basicConfig(format='%(asctime)s - %(levelname)s - line %(lineno)d:\n'
+                                   '-***- %(message)s -***-\n'+endline+'\n')
+
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(level=logging.INFO)
+        file_handler = logging.FileHandler(path + 'proxy.log')
+        file_handler.setLevel(level=logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - line %(lineno)d:\n'
+                                      '-***- %(message)s -***-\n'+endline+'\n')
+
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
+
+    def pop(self):
+        dic = {}
+        for proxy, score in self.conn.zrevrange(self.poolName, 0, 0, withscores=True):
+            dic = {str(proxy, encoding='utf-8'): score}
+            self.conn.zrem(self.poolName, proxy)
+        return dic
+
+    def getAll(self):
+        dicProxy = {str(proxy, encoding='utf-8'): score
+                    for proxy, score in self.conn.zrevrange(self.poolName, 0, -1, withscores=True)}
+        return dicProxy
+
+
+if __name__ == '__main__':
+    pool = proxypool()
+    while True:
+        try:
+            pool.monitor()
+        except Exception as e:
+            err = str(e)
+            pool.logger.critical(err)
+        finally:
+            time.sleep(5)
