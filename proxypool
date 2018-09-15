@@ -22,15 +22,15 @@ class proxypool():
     def loggerBuild(self):
         sys.stderr = sys.stdout
         endline = '-' * 20 + '*' * 20 + '-' * 20
-        logging.basicConfig(format='%(asctime)s - %(levelname)s - line %(lineno)d:\n'
-                                   '-***- %(message)s -***-\n'+endline+'\n')
+        logging.basicConfig(format='%(asctime)s - %(levelname)s - function->%(funcName)s - '
+                                   'line %(lineno)d: - %(message)s\n')
 
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(level=logging.INFO)
         file_handler = logging.FileHandler(path + 'proxy.log')
         file_handler.setLevel(level=logging.WARNING)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - line %(lineno)d:\n'
-                                      '    -***- %(message)s -***-\n'+endline+'\n')
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - function->%(funcName)s - '
+                                      'line %(lineno)d - %(message)s\n\n')
 
         file_handler.setFormatter(formatter)
         self.logger.addHandler(file_handler)
@@ -65,14 +65,13 @@ class proxypool():
         recycleLen = self.conn.llen(self.recycleName)
         for i in range(recycleLen):
             zipInfo = str(self.conn.rpop(self.recycleName), encoding='utf-8')
-            score, proxy, status = zipInfo.split(',')
-            score = self.scoreChange(score, status)
-            if score > 60:
-                self.puts(proxy, score)
-                self.logger.info(f'Recycle ip {proxy}.')
-            else:
-                self.logger.warning(f'Drop ip {proxy}.')
-                continue
+            score, proxy, status = self.unzip(zipInfo)
+            self.recyle(score, proxy, status)
+
+    def unzip(self, zipInfo):
+        score, proxy, status = zipInfo.split(',')
+        score = self.scoreChange(score, status)
+        return score, proxy, status
 
     def scoreChange(self, score, status):
         score = int(score)
@@ -82,6 +81,13 @@ class proxypool():
         else:
             score = score - dec
         return score
+
+    def recyle(self, score, proxy, status):
+        if score > 60:
+            self.puts(proxy, score)
+            self.logger.info(f'Recycle ip {proxy}.')
+        else:
+            self.logger.warning(f'Drop ip {proxy}.')
 
     def puts(self, proxy, score):
         self.conn.zadd(self.poolName, score, proxy)
@@ -94,7 +100,7 @@ class proxypool():
             poolCapability = self.conn.zcard(self.poolName)
             self.logger.info(f'Revised pool\'s capability is {poolCapability}')
         else:
-            print('Everything is ok.')
+            print('Everything is ok.\n')
 
     def poolAdd(self, num):
         print(f'Num is {num}')
@@ -108,46 +114,29 @@ class proxypool():
         req = requests.get(api)
         print(f'Api is {api}')
         proxys = req.text.split('\r\n')
-        print('Has get', len(proxys), 'proxys')
+        print('Has get', len(proxys), 'proxys\n')
         sufficient = False if 'ERROR' in proxys[0] else True
         if not sufficient:
             api = f'http://api3.xiguadaili.com/ip/?tid={tid}&num={num}&category=2&protocol=https&longlife=10'
             req = requests.get(api)
             proxys = req.text.split('\r\n')
-            self.logger.warning('IP amount is not enough,using old proxy.')
+            self.logger.warning('IP amount is not enough,using old proxy.\n')
         return proxys
 
 
 class ipGetter():
     def __init__(self):
-        self.loggerBuild()
         self.conn = redis.StrictRedis(host=redis_host,
                                       port=redis_port,
                                       password=redis_password)
         self.poolName = ipPool
         self.recycleName = ipRecycle
 
-    def loggerBuild(self):
-        sys.stderr = sys.stdout
-        endline = '-' * 20 + '*' * 20 + '-' * 20
-        logging.basicConfig(format='%(asctime)s - %(levelname)s - line %(lineno)d:\n'
-                                   '-***- %(message)s -***-\n'+endline+'\n')
-
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(level=logging.INFO)
-        file_handler = logging.FileHandler(path + 'proxy.log')
-        file_handler.setLevel(level=logging.INFO)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - line %(lineno)d:\n'
-                                      '-***- %(message)s -***-\n'+endline+'\n')
-
-        file_handler.setFormatter(formatter)
-        self.logger.addHandler(file_handler)
-
     def pop(self):
         dic = {}
         for proxy, score in self.conn.zrevrange(self.poolName, 0, 0, withscores=True):
             dic['proxy'], dic['score'] = str(proxy, encoding='utf-8'), int(score)
-            self.conn.zrem(self.poolName, proxy)
+        self.conn.zrem(self.poolName, proxy)
         return dic
 
     def getAll(self):
@@ -161,7 +150,7 @@ class ipGetter():
             ip = random.choice(r)
         except IndexError:
             r = self.conn.zrangebyscore('ipPool', 70, 100)
-            ip = self.random.choice(r)
+            ip = random.choice(r)
 
         return str(ip, encoding='utf-8')
 
